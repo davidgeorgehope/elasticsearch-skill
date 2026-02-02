@@ -1,10 +1,11 @@
 ---
 name: elasticsearch
 description: >
-  Interact with Elasticsearch clusters via REST API using curl. Use when querying, indexing,
-  managing indices, checking cluster health, writing aggregations, or troubleshooting
-  Elasticsearch. Requires cluster URL and API key. Covers: search (Query DSL), CRUD operations,
-  index management, mappings, aggregations, cluster health, ILM, transforms, and common
+  Interact with Elasticsearch and Kibana via REST API using curl. Use when querying, indexing,
+  managing indices, checking cluster health, writing aggregations, deploying dashboards, or
+  troubleshooting Elasticsearch. Requires cluster URL and API key. Covers: search (Query DSL),
+  CRUD operations, index management, mappings, aggregations, cluster health, ILM, ES|QL,
+  Kibana API (dashboards, data views, saved objects), OpenTelemetry data patterns, and common
   troubleshooting patterns.
 ---
 
@@ -246,6 +247,8 @@ curl -s "$ES_URL/_cluster/settings?include_defaults=false" \
   -H "Authorization: ApiKey $ES_API_KEY" | jq .
 ```
 
+For Kibana API operations (dashboards, data views, saved objects, alerting rules), see [references/kibana-api.md](references/kibana-api.md).
+
 ## Data Streams & ILM
 
 ```bash
@@ -282,6 +285,8 @@ curl -s -X POST "$ES_URL/_query" \
     "query": "FROM logs-* | WHERE level == \"error\" | STATS count = COUNT(*) BY service.name | SORT count DESC | LIMIT 10"
   }' | jq .
 ```
+
+For querying OpenTelemetry data (OTEL logs, traces, metrics, correlation patterns), see [references/otel-data.md](references/otel-data.md).
 
 ## Ingest Pipelines
 
