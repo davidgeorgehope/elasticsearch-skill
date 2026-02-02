@@ -76,15 +76,15 @@ curl -s -X DELETE "$KIBANA_URL/api/data_views/data_view/my-logs-view" \
 Saved objects are Kibana's storage model — dashboards, visualizations, data views, searches, etc.
 
 ```bash
-# Get a saved object
+# Get a saved object — NOT available on serverless
 curl -s "$KIBANA_URL/api/saved_objects/dashboard/my-dashboard-id" \
   -H "Authorization: ApiKey $ES_API_KEY" | jq .
 
-# Find saved objects by type
+# Find saved objects by type — NOT available on serverless
 curl -s "$KIBANA_URL/api/saved_objects/_find?type=dashboard&per_page=100" \
   -H "Authorization: ApiKey $ES_API_KEY" | jq '.saved_objects[] | {id, title: .attributes.title}'
 
-# Bulk create (with overwrite)
+# Bulk create (with overwrite) — NOT available on serverless
 curl -s -X POST "$KIBANA_URL/api/saved_objects/_bulk_create?overwrite=true" \
   -H "Authorization: ApiKey $ES_API_KEY" \
   -H "kbn-xsrf: true" \
@@ -97,13 +97,15 @@ curl -s -X POST "$KIBANA_URL/api/saved_objects/_bulk_create?overwrite=true" \
     }
   ]'
 
-# Delete saved object
+# Delete saved object — NOT available on serverless
 curl -s -X DELETE "$KIBANA_URL/api/saved_objects/dashboard/my-dashboard-id" \
   -H "Authorization: ApiKey $ES_API_KEY" \
   -H "kbn-xsrf: true"
 ```
 
 Saved object types: `dashboard`, `visualization`, `lens`, `search`, `index-pattern`, `map`, `tag`.
+
+**Serverless Kibana:** On Elastic Cloud Serverless, only `_import` and `_export` are available for saved objects. The `_find`, `_bulk_create`, individual GET, and DELETE endpoints all return `400 Bad Request`. Use `_import?overwrite=true` for create/update operations.
 
 ## Dashboard Import / Export
 
@@ -137,6 +139,8 @@ For Elastic Cloud Serverless and portability, use **by-value** dashboards where 
 {
   "type": "dashboard",
   "id": "my-dashboard",
+  "coreMigrationVersion": "8.8.0",
+  "typeMigrationVersion": "10.3.0",
   "attributes": {
     "title": "My Dashboard",
     "description": "Dashboard description",
@@ -150,6 +154,8 @@ For Elastic Cloud Serverless and portability, use **by-value** dashboards where 
   "references": []
 }
 ```
+
+**Critical:** `coreMigrationVersion` and `typeMigrationVersion` are **required** for serverless Kibana imports. Without them, the import returns a 500 Internal Server Error. Include them on all saved objects in NDJSON payloads.
 
 ### Panel Format (By-Value)
 
@@ -165,6 +171,8 @@ Each panel in `panelsJSON` has grid position and an embedded visualization:
       "visualizationType": "lnsMetric",
       "title": "Total Events",
       "state": {
+        "filters": [],
+        "query": {"query": "", "language": "kuery"},
         "datasourceStates": {
           "formBased": {
             "layers": {
@@ -174,7 +182,8 @@ Each panel in `panelsJSON` has grid position and an embedded visualization:
                     "operationType": "count",
                     "label": "Count",
                     "dataType": "number",
-                    "isBucketed": false
+                    "isBucketed": false,
+                    "sourceField": "___records___"
                   }
                 },
                 "columnOrder": ["col1"]
@@ -184,6 +193,7 @@ Each panel in `panelsJSON` has grid position and an embedded visualization:
         },
         "visualization": {
           "layerId": "layer1",
+          "layerType": "data",
           "metricAccessor": "col1"
         }
       },
@@ -195,7 +205,12 @@ Each panel in `panelsJSON` has grid position and an embedded visualization:
 }
 ```
 
-Grid uses a 48-column layout. Common panel sizes: metric `w:12 h:6`, chart `w:24 h:12`, table `w:48 h:14`.
+Grid uses a 48-column layout. Common panel sizes: metric `w:12 h:7`, chart `w:24 h:14`, table `w:48 h:12`.
+
+**Layer properties:** Each layer in `datasourceStates.formBased.layers` should include:
+- `"indexPatternId": "data-view-id"` — links the layer to its data view
+- `"incompleteColumns": {}` — required empty object
+- `"columns"` and `"columnOrder"` — the column definitions
 
 ### Lens Visualization Types
 
@@ -208,14 +223,19 @@ Grid uses a 48-column layout. Common panel sizes: metric `w:12 h:6`, chart `w:24
 
 ### Column Operation Types
 
-| Operation | Description | `isBucketed` |
-|-----------|-------------|--------------|
-| `count` | Document count | false |
-| `unique_count` | Cardinality | false |
-| `sum`, `avg`, `min`, `max` | Metric aggregations | false |
-| `terms` | Top values grouping | true |
-| `date_histogram` | Time buckets | true |
-| `filters` | Custom filter groups | true |
+| Operation | Description | `isBucketed` | `sourceField` | `scale` |
+|-----------|-------------|--------------|---------------|---------|
+| `count` | Document count | false | `"___records___"` (required!) | `"ratio"` |
+| `unique_count` | Cardinality | false | field name | `"ratio"` |
+| `sum`, `avg`, `min`, `max` | Metric aggregations | false | field name | `"ratio"` (see TSDB caveat) |
+| `terms` | Top values grouping | true | field name | `"ordinal"` |
+| `date_histogram` | Time buckets | true | field name | `"interval"` |
+| `filters` | Custom filter groups | true | — | `"ordinal"` |
+
+**Critical:**
+- `count` columns **must** include `"sourceField": "___records___"`. Without it, Kibana throws `aggValueCount requires the "field" argument`.
+- All columns **should** include `"scale"` for XY charts. Without it, XY charts may silently render empty despite correct configuration. Use `"interval"` for date_histogram, `"ordinal"` for terms/filters, `"ratio"` for metrics.
+- **TSDB gauge metrics** (e.g., `metrics.system.memory.utilization`, `metrics.system.cpu.utilization`) with `time_series_metric: gauge` in their mapping **cannot** be aggregated via `avg`/`sum`/`min`/`max` in programmatic Lens panels — the chart renders blank with no error. Use `count`-based panels for TSDB data instead, or view these metrics through Kibana's built-in Infrastructure/Metrics Explorer UI.
 
 ### Column with Filter
 
@@ -236,15 +256,24 @@ Grid uses a 48-column layout. Common panel sizes: metric `w:12 h:6`, chart `w:24
 
 ### XY Chart Visualization Config
 
+**Critical:** XY charts require a `layers` array wrapper, `preferredSeriesType`, `legend`, and `fittingFunction` at the top level. Without the `layers` array, charts render empty with no error. Without `legend`/`fittingFunction`, charts may also silently fail to render.
+
 ```json
 {
   "visualization": {
-    "layerId": "layer1",
-    "layerType": "data",
-    "seriesType": "area_stacked",
-    "xAccessor": "col-date",
-    "accessors": ["col-count"],
-    "splitAccessor": "col-category"
+    "preferredSeriesType": "area_stacked",
+    "legend": {"isVisible": true, "position": "right"},
+    "fittingFunction": "None",
+    "layers": [
+      {
+        "layerId": "layer1",
+        "layerType": "data",
+        "seriesType": "area_stacked",
+        "xAccessor": "col-date",
+        "accessors": ["col-count"],
+        "splitAccessor": "col-category"
+      }
+    ]
   }
 }
 ```
@@ -281,17 +310,20 @@ Add interactive filter controls to dashboards:
 
 ```bash
 # Generate NDJSON with data view + dashboard
+# NOTE: coreMigrationVersion + typeMigrationVersion are required for serverless
 cat > /tmp/dashboard.ndjson << 'EOF'
-{"type":"index-pattern","id":"my-logs","attributes":{"title":"logs-*","timeFieldName":"@timestamp"}}
-{"type":"dashboard","id":"my-dashboard","attributes":{"title":"My Dashboard","timeRestore":true,"timeFrom":"now-24h","timeTo":"now","panelsJSON":"[{\"type\":\"lens\",\"gridData\":{\"x\":0,\"y\":0,\"w\":48,\"h\":8,\"i\":\"p1\"},\"panelIndex\":\"p1\",\"embeddableConfig\":{\"attributes\":{\"visualizationType\":\"lnsMetric\",\"title\":\"Total Docs\",\"state\":{\"datasourceStates\":{\"formBased\":{\"layers\":{\"l1\":{\"columns\":{\"c1\":{\"operationType\":\"count\",\"label\":\"Count\",\"dataType\":\"number\",\"isBucketed\":false}},\"columnOrder\":[\"c1\"]}}}},\"visualization\":{\"layerId\":\"l1\",\"metricAccessor\":\"c1\"}},\"references\":[{\"type\":\"index-pattern\",\"id\":\"my-logs\",\"name\":\"indexpattern-datasource-layer-l1\"}]}}}]"},"references":[]}
+{"type":"index-pattern","id":"my-logs","coreMigrationVersion":"8.8.0","attributes":{"title":"logs-*","timeFieldName":"@timestamp"}}
+{"type":"dashboard","id":"my-dashboard","coreMigrationVersion":"8.8.0","typeMigrationVersion":"10.3.0","attributes":{"title":"My Dashboard","timeRestore":true,"timeFrom":"now-24h","timeTo":"now","panelsJSON":"[{\"type\":\"lens\",\"gridData\":{\"x\":0,\"y\":0,\"w\":48,\"h\":8,\"i\":\"p1\"},\"panelIndex\":\"p1\",\"embeddableConfig\":{\"attributes\":{\"visualizationType\":\"lnsMetric\",\"title\":\"Total Docs\",\"state\":{\"filters\":[],\"query\":{\"query\":\"\",\"language\":\"kuery\"},\"datasourceStates\":{\"formBased\":{\"layers\":{\"l1\":{\"columns\":{\"c1\":{\"operationType\":\"count\",\"label\":\"Count\",\"dataType\":\"number\",\"isBucketed\":false}},\"columnOrder\":[\"c1\"]}}}},\"visualization\":{\"layerId\":\"l1\",\"layerType\":\"data\",\"metricAccessor\":\"c1\"}},\"references\":[{\"type\":\"index-pattern\",\"id\":\"my-logs\",\"name\":\"indexpattern-datasource-layer-l1\"}]}}}]"},"references":[]}
 EOF
 
 # Import to Kibana
 curl -s -X POST "$KIBANA_URL/api/saved_objects/_import?overwrite=true" \
-  -H "Authorization: ApiKey $ES_API_KEY" \
+  -H "Authorization: ApiKey $(printenv ES_API_KEY)" \
   -H "kbn-xsrf: true" \
   --form file=@/tmp/dashboard.ndjson | jq .
 ```
+
+For complex dashboards with many panels, use a Python script to generate the NDJSON rather than hand-crafting the JSON strings. See the `panelsJSON` nesting: it's a JSON string containing an array of panel objects, each with deeply nested Lens state. Errors in this structure cause silent 500 errors on import.
 
 ## Alerting Rules
 

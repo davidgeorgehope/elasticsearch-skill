@@ -23,8 +23,8 @@ ES_URL="https://your-cluster.es.cloud.elastic.co:443"
 ES_API_KEY="your-base64-api-key"
 
 # All requests follow this pattern:
-curl -s "$ES_URL/<endpoint>" \
-  -H "Authorization: ApiKey $ES_API_KEY" \
+curl -s "${ES_URL%/}/<endpoint>" \
+  -H "Authorization: ApiKey $(printenv ES_API_KEY)" \
   -H "Content-Type: application/json" \
   -d '<json-body>'
 ```
@@ -33,27 +33,39 @@ curl -s "$ES_URL/<endpoint>" \
 
 If the user provides a URL and key, export them as `ES_URL` and `ES_API_KEY` before running commands.
 
+**Important — variable expansion in curl:**
+- Always use `$(printenv ES_API_KEY)` instead of `$ES_API_KEY` in curl headers. The `$ES_API_KEY` variable may not expand correctly in the shell, resulting in empty `Authorization` headers and 401 errors.
+- Always use `${ES_URL%/}` to strip any trailing slash from the URL, preventing double-slash path issues (e.g., `//_cluster/health`).
+
 ## Quick Health Check
 
 ```bash
-# Cluster health (green/yellow/red)
-curl -s "$ES_URL/_cluster/health" -H "Authorization: ApiKey $ES_API_KEY" | jq .
+# Cluster health (green/yellow/red) — NOT available on serverless
+curl -s "${ES_URL%/}/_cluster/health" -H "Authorization: ApiKey $(printenv ES_API_KEY)" | jq .
 
-# Node stats summary
-curl -s "$ES_URL/_cat/nodes?v&h=name,heap.percent,ram.percent,cpu,load_1m,disk.used_percent"  \
-  -H "Authorization: ApiKey $ES_API_KEY"
+# Node stats summary — NOT available on serverless
+curl -s "${ES_URL%/}/_cat/nodes?v&h=name,heap.percent,ram.percent,cpu,load_1m,disk.used_percent"  \
+  -H "Authorization: ApiKey $(printenv ES_API_KEY)"
 
-# Index overview
-curl -s "$ES_URL/_cat/indices?v&s=store.size:desc&h=index,health,status,docs.count,store.size" \
-  -H "Authorization: ApiKey $ES_API_KEY"
+# Index overview (works on both serverless and traditional)
+curl -s "${ES_URL%/}/_cat/indices?v&s=store.size:desc&h=index,health,status,docs.count,store.size" \
+  -H "Authorization: ApiKey $(printenv ES_API_KEY)"
 ```
+
+**Serverless Elasticsearch:** If you get `api_not_available_exception` errors, the cluster is running in serverless mode. The following APIs are **not available** in serverless:
+- `_cluster/health`, `_cluster/settings`, `_cluster/allocation/explain`, `_cluster/pending_tasks`
+- `_cat/nodes`, `_cat/shards`
+- `_nodes/hot_threads`, `_nodes/stats`
+- ILM APIs (`_ilm/*`)
+
+Use `_cat/indices` and `_search` APIs as the starting point instead — these work everywhere.
 
 ## Search (Query DSL)
 
 ```bash
 # Simple match query
-curl -s "$ES_URL/my-index/_search" \
-  -H "Authorization: ApiKey $ES_API_KEY" \
+curl -s "${ES_URL%/}/my-index/_search" \
+  -H "Authorization: ApiKey $(printenv ES_API_KEY)" \
   -H "Content-Type: application/json" \
   -d '{
     "query": { "match": { "message": "error timeout" } },
@@ -61,8 +73,8 @@ curl -s "$ES_URL/my-index/_search" \
   }' | jq .
 
 # Bool query (must + filter + must_not)
-curl -s "$ES_URL/my-index/_search" \
-  -H "Authorization: ApiKey $ES_API_KEY" \
+curl -s "${ES_URL%/}/my-index/_search" \
+  -H "Authorization: ApiKey $(printenv ES_API_KEY)" \
   -H "Content-Type: application/json" \
   -d '{
     "query": {
@@ -83,8 +95,8 @@ For full Query DSL reference (term, terms, range, wildcard, regexp, nested, exis
 
 ```bash
 # Create index with mappings
-curl -s -X PUT "$ES_URL/my-index" \
-  -H "Authorization: ApiKey $ES_API_KEY" \
+curl -s -X PUT "${ES_URL%/}/my-index" \
+  -H "Authorization: ApiKey $(printenv ES_API_KEY)" \
   -H "Content-Type: application/json" \
   -d '{
     "settings": { "number_of_shards": 1, "number_of_replicas": 1 },
@@ -99,33 +111,33 @@ curl -s -X PUT "$ES_URL/my-index" \
   }'
 
 # Index a document (auto-generate ID)
-curl -s -X POST "$ES_URL/my-index/_doc" \
-  -H "Authorization: ApiKey $ES_API_KEY" \
+curl -s -X POST "${ES_URL%/}/my-index/_doc" \
+  -H "Authorization: ApiKey $(printenv ES_API_KEY)" \
   -H "Content-Type: application/json" \
   -d '{ "message": "hello world", "@timestamp": "2026-01-31T12:00:00Z", "level": "info" }'
 
 # Index with specific ID
-curl -s -X PUT "$ES_URL/my-index/_doc/doc-123" \
-  -H "Authorization: ApiKey $ES_API_KEY" \
+curl -s -X PUT "${ES_URL%/}/my-index/_doc/doc-123" \
+  -H "Authorization: ApiKey $(printenv ES_API_KEY)" \
   -H "Content-Type: application/json" \
   -d '{ "message": "specific doc", "level": "warn" }'
 
 # Get document
-curl -s "$ES_URL/my-index/_doc/doc-123" -H "Authorization: ApiKey $ES_API_KEY" | jq .
+curl -s "${ES_URL%/}/my-index/_doc/doc-123" -H "Authorization: ApiKey $(printenv ES_API_KEY)" | jq .
 
 # Update document (partial)
-curl -s -X POST "$ES_URL/my-index/_update/doc-123" \
-  -H "Authorization: ApiKey $ES_API_KEY" \
+curl -s -X POST "${ES_URL%/}/my-index/_update/doc-123" \
+  -H "Authorization: ApiKey $(printenv ES_API_KEY)" \
   -H "Content-Type: application/json" \
   -d '{ "doc": { "level": "error" } }'
 
 # Delete document
-curl -s -X DELETE "$ES_URL/my-index/_doc/doc-123" \
-  -H "Authorization: ApiKey $ES_API_KEY"
+curl -s -X DELETE "${ES_URL%/}/my-index/_doc/doc-123" \
+  -H "Authorization: ApiKey $(printenv ES_API_KEY)"
 
 # Bulk operations (newline-delimited JSON)
-curl -s -X POST "$ES_URL/_bulk" \
-  -H "Authorization: ApiKey $ES_API_KEY" \
+curl -s -X POST "${ES_URL%/}/_bulk" \
+  -H "Authorization: ApiKey $(printenv ES_API_KEY)" \
   -H "Content-Type: application/x-ndjson" \
   --data-binary @- << 'EOF'
 {"index":{"_index":"my-index"}}
@@ -139,8 +151,8 @@ EOF
 
 ```bash
 # Terms aggregation (top values)
-curl -s "$ES_URL/my-index/_search?size=0" \
-  -H "Authorization: ApiKey $ES_API_KEY" \
+curl -s "${ES_URL%/}/my-index/_search?size=0" \
+  -H "Authorization: ApiKey $(printenv ES_API_KEY)" \
   -H "Content-Type: application/json" \
   -d '{
     "aggs": {
@@ -149,8 +161,8 @@ curl -s "$ES_URL/my-index/_search?size=0" \
   }' | jq '.aggregations'
 
 # Date histogram + nested metric
-curl -s "$ES_URL/my-index/_search?size=0" \
-  -H "Authorization: ApiKey $ES_API_KEY" \
+curl -s "${ES_URL%/}/my-index/_search?size=0" \
+  -H "Authorization: ApiKey $(printenv ES_API_KEY)" \
   -H "Content-Type: application/json" \
   -d '{
     "query": { "range": { "@timestamp": { "gte": "now-24h" } } },
@@ -171,17 +183,17 @@ For more aggregation types (cardinality, percentiles, composite, filters, signif
 
 ```bash
 # Get mapping
-curl -s "$ES_URL/my-index/_mapping" -H "Authorization: ApiKey $ES_API_KEY" | jq .
+curl -s "${ES_URL%/}/my-index/_mapping" -H "Authorization: ApiKey $(printenv ES_API_KEY)" | jq .
 
 # Add field to existing mapping (mappings are additive — you can't change existing field types)
-curl -s -X PUT "$ES_URL/my-index/_mapping" \
-  -H "Authorization: ApiKey $ES_API_KEY" \
+curl -s -X PUT "${ES_URL%/}/my-index/_mapping" \
+  -H "Authorization: ApiKey $(printenv ES_API_KEY)" \
   -H "Content-Type: application/json" \
   -d '{ "properties": { "new_field": { "type": "keyword" } } }'
 
 # Reindex (change mappings, rename index, etc.)
-curl -s -X POST "$ES_URL/_reindex" \
-  -H "Authorization: ApiKey $ES_API_KEY" \
+curl -s -X POST "${ES_URL%/}/_reindex" \
+  -H "Authorization: ApiKey $(printenv ES_API_KEY)" \
   -H "Content-Type: application/json" \
   -d '{
     "source": { "index": "old-index" },
@@ -189,11 +201,11 @@ curl -s -X POST "$ES_URL/_reindex" \
   }'
 
 # Delete index
-curl -s -X DELETE "$ES_URL/my-index" -H "Authorization: ApiKey $ES_API_KEY"
+curl -s -X DELETE "${ES_URL%/}/my-index" -H "Authorization: ApiKey $(printenv ES_API_KEY)"
 
 # Index aliases
-curl -s -X POST "$ES_URL/_aliases" \
-  -H "Authorization: ApiKey $ES_API_KEY" \
+curl -s -X POST "${ES_URL%/}/_aliases" \
+  -H "Authorization: ApiKey $(printenv ES_API_KEY)" \
   -H "Content-Type: application/json" \
   -d '{
     "actions": [
@@ -203,8 +215,8 @@ curl -s -X POST "$ES_URL/_aliases" \
   }'
 
 # Index templates (for time-series / rollover patterns)
-curl -s -X PUT "$ES_URL/_index_template/my-template" \
-  -H "Authorization: ApiKey $ES_API_KEY" \
+curl -s -X PUT "${ES_URL%/}/_index_template/my-template" \
+  -H "Authorization: ApiKey $(printenv ES_API_KEY)" \
   -H "Content-Type: application/json" \
   -d '{
     "index_patterns": ["logs-*"],
@@ -222,42 +234,46 @@ curl -s -X PUT "$ES_URL/_index_template/my-template" \
 
 ## Cluster & Troubleshooting
 
+> **Note:** Most APIs in this section are **not available on serverless** Elasticsearch. They only work on self-managed or traditional Elastic Cloud deployments.
+
 ```bash
-# Allocation explanation (why is a shard unassigned?)
-curl -s "$ES_URL/_cluster/allocation/explain" \
-  -H "Authorization: ApiKey $ES_API_KEY" \
+# Allocation explanation (why is a shard unassigned?) — NOT serverless
+curl -s "${ES_URL%/}/_cluster/allocation/explain" \
+  -H "Authorization: ApiKey $(printenv ES_API_KEY)" \
   -H "Content-Type: application/json" \
   -d '{ "index": "my-index", "shard": 0, "primary": true }' | jq .
 
 # Pending tasks
-curl -s "$ES_URL/_cluster/pending_tasks" -H "Authorization: ApiKey $ES_API_KEY" | jq .
+curl -s "${ES_URL%/}/_cluster/pending_tasks" -H "Authorization: ApiKey $(printenv ES_API_KEY)" | jq .
 
 # Hot threads (performance debugging)
-curl -s "$ES_URL/_nodes/hot_threads" -H "Authorization: ApiKey $ES_API_KEY"
+curl -s "${ES_URL%/}/_nodes/hot_threads" -H "Authorization: ApiKey $(printenv ES_API_KEY)"
 
 # Shard allocation
-curl -s "$ES_URL/_cat/shards?v&s=store:desc&h=index,shard,prirep,state,docs,store,node" \
-  -H "Authorization: ApiKey $ES_API_KEY"
+curl -s "${ES_URL%/}/_cat/shards?v&s=store:desc&h=index,shard,prirep,state,docs,store,node" \
+  -H "Authorization: ApiKey $(printenv ES_API_KEY)"
 
 # Task management (long-running operations)
-curl -s "$ES_URL/_tasks?actions=*search&detailed" -H "Authorization: ApiKey $ES_API_KEY" | jq .
+curl -s "${ES_URL%/}/_tasks?actions=*search&detailed" -H "Authorization: ApiKey $(printenv ES_API_KEY)" | jq .
 
 # Cluster settings (persistent + transient)
-curl -s "$ES_URL/_cluster/settings?include_defaults=false" \
-  -H "Authorization: ApiKey $ES_API_KEY" | jq .
+curl -s "${ES_URL%/}/_cluster/settings?include_defaults=false" \
+  -H "Authorization: ApiKey $(printenv ES_API_KEY)" | jq .
 ```
 
 For Kibana API operations (dashboards, data views, saved objects, alerting rules), see [references/kibana-api.md](references/kibana-api.md).
 
 ## Data Streams & ILM
 
+> **Note:** ILM APIs (`_ilm/*`) are **not available on serverless**. Data stream listing works on both.
+
 ```bash
 # List data streams
-curl -s "$ES_URL/_data_stream" -H "Authorization: ApiKey $ES_API_KEY" | jq .
+curl -s "${ES_URL%/}/_data_stream" -H "Authorization: ApiKey $(printenv ES_API_KEY)" | jq .
 
 # Create ILM policy
-curl -s -X PUT "$ES_URL/_ilm/policy/my-policy" \
-  -H "Authorization: ApiKey $ES_API_KEY" \
+curl -s -X PUT "${ES_URL%/}/_ilm/policy/my-policy" \
+  -H "Authorization: ApiKey $(printenv ES_API_KEY)" \
   -H "Content-Type: application/json" \
   -d '{
     "policy": {
@@ -270,7 +286,7 @@ curl -s -X PUT "$ES_URL/_ilm/policy/my-policy" \
   }'
 
 # Check ILM status for an index
-curl -s "$ES_URL/my-index/_ilm/explain" -H "Authorization: ApiKey $ES_API_KEY" | jq .
+curl -s "${ES_URL%/}/my-index/_ilm/explain" -H "Authorization: ApiKey $(printenv ES_API_KEY)" | jq .
 ```
 
 ## ES|QL (Elasticsearch Query Language)
@@ -278,8 +294,8 @@ curl -s "$ES_URL/my-index/_ilm/explain" -H "Authorization: ApiKey $ES_API_KEY" |
 For Elasticsearch 8.11+, ES|QL offers a pipe-based query syntax:
 
 ```bash
-curl -s -X POST "$ES_URL/_query" \
-  -H "Authorization: ApiKey $ES_API_KEY" \
+curl -s -X POST "${ES_URL%/}/_query" \
+  -H "Authorization: ApiKey $(printenv ES_API_KEY)" \
   -H "Content-Type: application/json" \
   -d '{
     "query": "FROM logs-* | WHERE level == \"error\" | STATS count = COUNT(*) BY service.name | SORT count DESC | LIMIT 10"
@@ -292,8 +308,8 @@ For querying OpenTelemetry data (OTEL logs, traces, metrics, correlation pattern
 
 ```bash
 # Create pipeline
-curl -s -X PUT "$ES_URL/_ingest/pipeline/my-pipeline" \
-  -H "Authorization: ApiKey $ES_API_KEY" \
+curl -s -X PUT "${ES_URL%/}/_ingest/pipeline/my-pipeline" \
+  -H "Authorization: ApiKey $(printenv ES_API_KEY)" \
   -H "Content-Type: application/json" \
   -d '{
     "processors": [
@@ -304,8 +320,8 @@ curl -s -X PUT "$ES_URL/_ingest/pipeline/my-pipeline" \
   }'
 
 # Test pipeline
-curl -s -X POST "$ES_URL/_ingest/pipeline/my-pipeline/_simulate" \
-  -H "Authorization: ApiKey $ES_API_KEY" \
+curl -s -X POST "${ES_URL%/}/_ingest/pipeline/my-pipeline/_simulate" \
+  -H "Authorization: ApiKey $(printenv ES_API_KEY)" \
   -H "Content-Type: application/json" \
   -d '{
     "docs": [
