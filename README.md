@@ -10,16 +10,60 @@ A markdown-based skill that teaches Claude Code how to interact with Elasticsear
 | `references/query-dsl.md` | Full Query DSL — bool, match, term, range, nested, geo, wildcards, runtime fields, search_after |
 | `references/aggregations.md` | Metric, bucket, and pipeline aggregations — plus SRE patterns (error rates, top-N leaderboards) |
 
-## Setup
+## Installation
 
-Point Claude Code at your cluster:
+Claude Code loads skills from local directories, not from GitHub URLs. Clone this repo, then copy the files to one of the supported skill locations.
+
+### Option A: Personal skill (available in all projects)
+
+```bash
+git clone https://github.com/davidgeorgehope/elasticsearch-skill.git
+mkdir -p ~/.claude/skills/elasticsearch
+cp elasticsearch-skill/SKILL.md ~/.claude/skills/elasticsearch/
+cp -r elasticsearch-skill/references ~/.claude/skills/elasticsearch/
+```
+
+### Option B: Project skill (available in one repo only)
+
+From within your project's root directory:
+
+```bash
+git clone https://github.com/davidgeorgehope/elasticsearch-skill.git /tmp/elasticsearch-skill
+mkdir -p .claude/skills/elasticsearch
+cp /tmp/elasticsearch-skill/SKILL.md .claude/skills/elasticsearch/
+cp -r /tmp/elasticsearch-skill/references .claude/skills/elasticsearch/
+```
+
+Then commit the `.claude/skills/elasticsearch/` directory to your repo so your team gets it too.
+
+### Verify
+
+Restart Claude Code, then check the skill is loaded:
+
+```
+/skills
+```
+
+You should see `elasticsearch` in the list.
+
+> **Note:** Adding a GitHub URL to the `skills` array in `~/.claude/settings.json` does **not** work. Skills must be local files — there is no remote fetching.
+
+## Configuration
+
+Set your cluster credentials as environment variables before starting Claude Code:
 
 ```bash
 export ES_URL="https://your-cluster.es.cloud.elastic.co:443"
 export ES_API_KEY="your-base64-api-key"
 ```
 
-That's it. No server to run, no dependencies to install, no Docker container to spin up.
+Optionally, for Kibana API access:
+
+```bash
+export KIBANA_URL="https://your-cluster.kb.cloud.elastic.co:443"
+```
+
+No server to run, no dependencies to install, no Docker container to spin up.
 
 ## Why a Skill and Not MCP?
 
