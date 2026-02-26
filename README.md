@@ -98,7 +98,7 @@ A skill is a markdown file that tells the LLM:
 
 The LLM reads this, then writes and executes the actual API calls. No protocol translation layer, no tool schema overhead, no server process to maintain.
 
-As [Mario Zechner put it](https://marioslab.io/posts/codex/primitives-not-frameworks/): *"Skills achieve the same progressive disclosure Anthropic describes, but without needing MCP as the underlying protocol… I could replace their MCPs with markdown files that explain how to correctly call their APIs or use their CLIs."*
+As [Bill Prin put it](https://www.aiengineering.report/p/was-mcp-a-mistake-the-internet-weighs): *"Skills achieve the same progressive disclosure Anthropic describes, but without needing MCP as the underlying protocol… I could replace their MCPs with markdown files that explain how to correctly call their APIs or use their CLIs."*
 
 ### The practical argument
 
